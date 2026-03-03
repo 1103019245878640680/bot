@@ -9,7 +9,6 @@ app.use(express.json());
 const SCANNER_SECRET    = process.env.SCANNER_SECRET;
 const JUNKIE_IDENTIFIER = process.env.JUNKIE_IDENTIFIER;
 
-// ─── Stockage en mémoire ───
 const detections = [];
 const MAX_STORE  = 500;
 
@@ -92,7 +91,8 @@ app.get('/api/panel', (req, res) => {
 });
 
 // ══════════════════════════════════════════
-// Vérification Key Junkie (Work.ink SDK)
+// Vérification Key Junkie
+// FIX: headers navigateur pour bypass Cloudflare
 // ══════════════════════════════════════════
 function verifyJunkieKey(key, callback) {
     if (!JUNKIE_IDENTIFIER) {
@@ -100,14 +100,26 @@ function verifyJunkieKey(key, callback) {
         return callback(false, 'Server misconfigured');
     }
 
-    const url = `https://jnkie.com/api/verifykey?key=${encodeURIComponent(key)}&service=${encodeURIComponent(JUNKIE_IDENTIFIER)}`;
-    console.log(`[JUNKIE] URL: ${url}`);
+    const options = {
+        hostname: 'jnkie.com',
+        path: `/api/verifykey?key=${encodeURIComponent(key)}&service=${encodeURIComponent(JUNKIE_IDENTIFIER)}`,
+        method: 'GET',
+        headers: {
+            'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept':          'application/json, text/plain, */*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer':         'https://jnkie.com/',
+            'Origin':          'https://jnkie.com',
+        }
+    };
 
-    https.get(url, (resp) => {
+    console.log(`[JUNKIE] Checking: jnkie.com${options.path}`);
+
+    const req = https.request(options, (resp) => {
         let data = '';
         resp.on('data', chunk => data += chunk);
         resp.on('end', () => {
-            console.log(`[JUNKIE] Raw: ${data.substring(0, 300)}`);
+            console.log(`[JUNKIE] Status: ${resp.statusCode} | Raw: ${data.substring(0, 300)}`);
             try {
                 const json = JSON.parse(data);
                 const isValid = json.success === true || json.valid === true;
@@ -117,10 +129,14 @@ function verifyJunkieKey(key, callback) {
                 callback(false, 'Junkie parse error');
             }
         });
-    }).on('error', (e) => {
+    });
+
+    req.on('error', (e) => {
         console.log(`[JUNKIE] Network error: ${e.message}`);
         callback(false, 'Junkie unreachable');
     });
+
+    req.end();
 }
 
 // ══════════════════════════════════════════
